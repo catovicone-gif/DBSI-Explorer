@@ -31,6 +31,12 @@ python dbsi_gui_app.py
 (Tkinter ships with the standard Windows/macOS Python installers; on Linux
 it's typically a separate OS package, e.g. `sudo apt install python3-tk`.)
 
+### Windows executable
+
+`build_exe.ps1` packages the GUI with PyInstaller into a single file,
+`dist\DBSI-Explorer.exe`, that runs without a Python installation (setup
+steps are in the script's header).
+
 ## Repository layout
 
 ```

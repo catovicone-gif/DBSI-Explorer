@@ -37,6 +37,8 @@ import dbsi_config
 from dbsi_core import LOCATIONS, Location
 
 MAX_SAMPLES = 2_000_000  # sanity cap so a fat-fingered "1-minute steps for 50 years" can't hang the GUI
+MAX_HATM_KM = 300.0      # transmittance table cost grows as H_a^2: ~0.6 s at 100 km, ~1 minute at 1000 km
+MAX_BIRD_ALT_M = 40_000.0  # isa_surface_pressure_mb() goes NaN above ~44 km
 
 
 class DBSIApp:
@@ -49,8 +51,8 @@ class DBSIApp:
 
         self._build_menu()
         self._build_input_panel()
+        self._build_status_bar()  # before the plot panel, so the plot (not the status bar) gives up space
         self._build_plot_panel()
-        self._build_status_bar()
 
         self._apply_params(dbsi_config.DEFAULT_PARAMS)
 
@@ -76,8 +78,10 @@ class DBSIApp:
 
         left = ttk.Frame(outer)
         left.grid(row=0, column=0, sticky="nw", padx=(0, 12))
+        mid = ttk.Frame(outer)
+        mid.grid(row=0, column=1, sticky="nw", padx=(0, 12))
         right = ttk.Frame(outer)
-        right.grid(row=0, column=1, sticky="nw")
+        right.grid(row=0, column=2, sticky="nw")
 
         # --- Orbital elements ---
         f = ttk.LabelFrame(left, text="Orbital elements", padding=8)
@@ -90,8 +94,8 @@ class DBSIApp:
         self._labeled_entry(f, "Eccentricity, e:", self.v_ecc, 0)
         self._labeled_entry(f, "Obliquity, ε (deg):", self.v_obliquity, 1)
         self._labeled_entry(f, "Longitude of perihelion, ω~ (deg):", self.v_omega, 2)
-        self._labeled_entry(f, "Perihelion date/time (UTC, ISO):", self.v_tp, 3, width=22)
-        self._labeled_entry(f, "Orbital period, Pa (days):", self.v_period, 4)
+        self._labeled_entry(f, "Perihelion date/time (UTC, ISO):", self.v_tp, 3, width=28)
+        self._labeled_entry(f, "Orbital period, Pa (days):", self.v_period, 4, width=28)
 
         # --- Location ---
         f = ttk.LabelFrame(left, text="Location", padding=8)
@@ -111,7 +115,7 @@ class DBSIApp:
         self._labeled_entry(f, "Altitude (m):", self.v_alt, 3)
 
         # --- Time range ---
-        f = ttk.LabelFrame(left, text="Time range", padding=8)
+        f = ttk.LabelFrame(mid, text="Time range", padding=8)
         f.pack(fill=tk.X, pady=4)
         self.v_start = tk.StringVar()
         self.v_end = tk.StringVar()
@@ -128,7 +132,7 @@ class DBSIApp:
             row=3, column=0, columnspan=2, sticky="w")
 
         # --- Atmosphere ---
-        f = ttk.LabelFrame(right, text="Atmosphere (this paper's own model)", padding=8)
+        f = ttk.LabelFrame(mid, text="Atmosphere (this paper's own model)", padding=8)
         f.pack(fill=tk.X, pady=4)
         self.v_tsi = tk.StringVar()
         self.v_sigext = tk.StringVar()
@@ -181,9 +185,13 @@ class DBSIApp:
         self.ax1 = self.fig.add_subplot(212)
         self.fig.tight_layout(pad=3.0)
         self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar = NavigationToolbar2Tk(self.canvas, frame)
+        # Toolbar is packed before the canvas so that, when the window is
+        # shorter than the figure's natural height, the canvas is what
+        # shrinks instead of the toolbar being pushed off-screen.
+        toolbar = NavigationToolbar2Tk(self.canvas, frame, pack_toolbar=False)
         toolbar.update()
+        toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
     def _build_status_bar(self):
         self.status = tk.StringVar(value="Ready.")
@@ -273,6 +281,59 @@ class DBSIApp:
         }
         return params
 
+    @staticmethod
+    def _validate_params(params):
+        """Range-checks a _collect_params() dict before it reaches
+        dbsi_core.run_dbsi(), which does no input checking of its own:
+        out-of-range values there either raise an opaque exception (Pa=0,
+        e=1, H_a<0), freeze the GUI (large H_a -- the transmittance table
+        costs O(H_a^2)), or silently return NaN/complex/unphysical numbers
+        (H_a=0, negative sigma_ext or turbidity). Returns the parsed
+        (start, end, perihelion) datetime64 values; raises ValueError with
+        a plain message otherwise."""
+        o, l, t, a, b = (params['orbital'], params['location'], params['time'],
+                         params['atmosphere'], params['bird'])
+
+        def check(ok, msg):
+            if not ok:
+                raise ValueError(msg)
+
+        def when(text, label):
+            try:
+                val = np.datetime64(text)
+            except ValueError:
+                val = np.datetime64('NaT')
+            check(not np.isnat(val), f"'{label}' must be an ISO date/time such as "
+                                     f"2024-01-01T00:00:00 (got {text!r}).")
+            return val
+
+        check(0.0 <= o['eccentricity'] < 1.0, "Eccentricity must be in [0, 1).")
+        check(o['orbital_period_days'] > 0.0, "Orbital period must be positive.")
+        check(-90.0 <= l['latitude_deg'] <= 90.0, "Latitude must be between -90 and 90 deg.")
+        check(a['tsi_wm2'] >= 0.0, "TSI must not be negative.")
+        check(a['sigma_ext_m2kg'] >= 0.0, "sigma_ext must not be negative.")
+        check(a['atm_density_kgm3'] >= 0.0, "rho_0 must not be negative.")
+        check(0.0 < a['atm_thickness_km'] <= MAX_HATM_KM,
+              f"H_a must be greater than 0 and at most {MAX_HATM_KM:g} km.")
+        check(t['samples_per_day'] > 0, "Resolution must be a positive number of samples per day.")
+        if b['include_bird']:
+            check(min(b['tau_a038'], b['tau_a05'], b['ozone_atmcm'], b['water_cm']) >= 0.0,
+                  "Bird & Hulstrom turbidity, ozone and water inputs must not be negative.")
+            check(l['altitude_m'] <= MAX_BIRD_ALT_M,
+                  f"The Bird & Hulstrom model's standard-atmosphere pressure is only defined "
+                  f"up to {MAX_BIRD_ALT_M:,.0f} m altitude.")
+
+        start = when(t['start_datetime'], "Start")
+        end = when(t['end_datetime'], "End")
+        t_p = when(o['perihelion_datetime'], "Perihelion date/time")
+        check(end > start, "End must be after start.")
+        days = (end - start) / np.timedelta64(1, 'D')
+        n = days * t['samples_per_day']
+        check(n <= MAX_SAMPLES,
+              f"This time range/resolution would compute {n:,.0f} points "
+              f"(limit {MAX_SAMPLES:,}). Shorten the range or reduce the resolution.")
+        return start, end, t_p
+
     # ------------------------------------------------------------------
     # Callbacks
     # ------------------------------------------------------------------
@@ -318,6 +379,7 @@ class DBSIApp:
     def on_run(self):
         try:
             params = self._collect_params()
+            start, end, t_p = self._validate_params(params)
         except ValueError as exc:
             messagebox.showerror("Invalid input", str(exc))
             return
@@ -326,21 +388,11 @@ class DBSIApp:
                          params['atmosphere'], params['bird'])
         try:
             t0 = time.time()
-            tg = dbsi_core.make_time_grid(t['start_datetime'], t['end_datetime'],
-                                           samples_per_day=t['samples_per_day'])
-            if len(tg.JD) > MAX_SAMPLES:
-                messagebox.showerror(
-                    "Too many samples",
-                    f"This time range/resolution would compute {len(tg.JD):,} points "
-                    f"(limit {MAX_SAMPLES:,}). Shorten the range or reduce the resolution.")
-                return
-            if len(tg.JD) < 2:
-                messagebox.showerror("Invalid time range", "End must be after start.")
-                return
+            tg = dbsi_core.make_time_grid(start, end, samples_per_day=t['samples_per_day'])
 
             loc = Location(name=l['name'], lon_deg=l['longitude_deg'], lat_deg=l['latitude_deg'],
                             tz_hours=0.0, alt_m=l['altitude_m'])
-            t_p_jd = dbsi_core.datetime_to_jd(o['perihelion_datetime'])
+            t_p_jd = dbsi_core.datetime_to_jd(t_p)
 
             res = dbsi_core.run_dbsi(
                 loc, tg,
@@ -374,7 +426,8 @@ class DBSIApp:
             self.ax0.plot(gd, res['DBSI0_bird'], lw=0.7, ls='--', label='DBSI0 (Bird & Hulstrom)')
             self.ax0.plot(gd, res['DBSI2_bird'], lw=0.7, ls='--', label='DBSI2 (Bird & Hulstrom)')
         self.ax0.set_ylabel('DBSI (W/m$^2$)')
-        self.ax0.set_title(f"{loc.name}: DBSI0 / DBSI2, {gd[0]} to {gd[-1]}")
+        span = np.datetime_as_string(gd[[0, -1]], unit='s')
+        self.ax0.set_title(f"{loc.name}: DBSI0 / DBSI2, {span[0]} to {span[1]}")
         self.ax0.grid(True)
         self.ax0.legend(fontsize=8)
 

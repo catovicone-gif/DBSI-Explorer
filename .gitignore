@@ -7,6 +7,10 @@ venv/
 env/
 *.egg-info/
 
+# PyInstaller output (build_exe.ps1)
+build/
+dist/
+
 # OS
 .DS_Store
 Thumbs.db

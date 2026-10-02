@@ -167,8 +167,23 @@ def make_time_grid(start, end, samples_per_day=24):
     step count, not a per-DAY one, so it must be divided by Pd=24 here to
     turn a "samples_per_day" request into the nstep build_time_grid()
     actually wants -- passing samples_per_day straight through as nstep
-    would silently produce 24x too many points."""
-    return build_time_grid(start, end, Pa=None, Pd=24.0, nstep=float(samples_per_day) / 24.0)
+    would silently produce 24x too many points.
+
+    The grid itself is built here on exact integer-microsecond timestamps
+    rather than by calling build_time_grid(): its np.arange(jd_start,
+    jd_end, step) takes a fractional-day step at Julian-Date magnitude
+    (~2.46e6, float64 resolution ~40 us), and np.arange's effective step is
+    (start+step)-start, so that rounding error accumulates linearly --
+    ~0.1 s over a year of hourly samples, ~2 s over a year of 1-minute
+    samples -- and 00:00:00 comes back as 23:59:59.88. Same step size,
+    same endpoints-inclusive convention, no drift."""
+    start_us = np.datetime64(start).astype('datetime64[us]')
+    span_us = float((np.datetime64(end).astype('datetime64[us]') - start_us).astype('int64'))
+    step_us = 86400e6 / float(samples_per_day)
+    n = int(np.floor(span_us / step_us + 1e-9)) + 1
+    GD = start_us + np.round(np.arange(max(n, 0)) * step_us).astype('int64').astype('timedelta64[us]')
+    JD = gdt2jd(GD)
+    return TimeGrid(JD=JD, GD=GD, t=JD - JD[0] if n > 0 else JD, step_days=1.0 / float(samples_per_day))
 
 
 def datetime_to_jd(dt_str_or_val):
