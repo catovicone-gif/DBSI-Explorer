@@ -17,6 +17,7 @@ Thumbs.db
 
 # Editor
 .vscode/
+.vs/
 .idea/
 
 # This tool's own outputs, if run in place
