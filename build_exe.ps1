@@ -12,6 +12,7 @@ $root = $PSScriptRoot
     --noconfirm --clean --onefile --windowed `
     --name "DBSI-Explorer" `
     --paths "$root\DBSI_GUI" --paths "$root\bin" `
+    --add-data "$root\DBSI_GUI\ArxivPaperR04InsolationExpansion.pdf;." `
     --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 --exclude-module PySide6 `
     --exclude-module IPython --exclude-module scipy --exclude-module pandas `
     --distpath "$root\dist" --workpath "$root\build" --specpath "$root\build" `

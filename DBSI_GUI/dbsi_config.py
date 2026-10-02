@@ -131,7 +131,7 @@ def save_config(path, params):
     short explanatory comment above each section."""
     cp = configparser.ConfigParser()
     lines = ["# DBSI GUI configuration file",
-             "# Companion tool to ArxivPaperR03InsolationExpansion.tex",
+             "# Companion tool to ArxivPaperR04InsolationExpansion.tex",
              "# Any key omitted falls back to this paper's own default value.",
              ""]
     for sec, defaults in DEFAULT_PARAMS.items():

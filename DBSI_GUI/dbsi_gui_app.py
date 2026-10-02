@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import traceback
+import webbrowser
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -40,11 +41,16 @@ MAX_SAMPLES = 2_000_000  # sanity cap so a fat-fingered "1-minute steps for 50 y
 MAX_HATM_KM = 300.0      # transmittance table cost grows as H_a^2: ~0.6 s at 100 km, ~1 minute at 1000 km
 MAX_BIRD_ALT_M = 40_000.0  # isa_surface_pressure_mb() goes NaN above ~44 km
 
+# The paper this tool accompanies, shipped next to this script (and bundled
+# into the PyInstaller executable, which unpacks its data files to _MEIPASS).
+PAPER_PDF = os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__))),
+                         'ArxivPaperR04InsolationExpansion.pdf')
+
 
 class DBSIApp:
     def __init__(self, root):
         self.root = root
-        root.title("DBSI0 / DBSI2 Explorer -- companion to ArxivPaperR03InsolationExpansion")
+        root.title("DBSI0 / DBSI2 Explorer -- companion to ArxivPaperR04InsolationExpansion")
         root.geometry("1280x900")
 
         self.results = None  # last run_dbsi() output dict, for CSV/PNG export
@@ -68,7 +74,7 @@ class DBSIApp:
         filemenu.add_command(label="Export CSV...", command=self.on_export_csv)
         filemenu.add_command(label="Save Plot as PNG...", command=self.on_save_png)
         filemenu.add_separator()
-        filemenu.add_command(label="Quit", command=self.root.quit)
+        filemenu.add_command(label="Quit", command=self.root.destroy)
         bar.add_cascade(label="File", menu=filemenu)
         self.root.config(menu=bar)
 
@@ -195,8 +201,12 @@ class DBSIApp:
 
     def _build_status_bar(self):
         self.status = tk.StringVar(value="Ready.")
-        bar = ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor="w", padding=4)
+        bar = ttk.Frame(self.root)
         bar.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(bar, text="Exit", command=self.root.destroy).pack(side=tk.RIGHT, padx=(2, 4), pady=2)
+        ttk.Button(bar, text="Open Paper (PDF)", command=self.on_open_paper).pack(side=tk.RIGHT, padx=2, pady=2)
+        ttk.Label(bar, textvariable=self.status, relief=tk.SUNKEN, anchor="w", padding=4).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
 
     # ------------------------------------------------------------------
     # Parameter <-> widget plumbing
@@ -489,6 +499,21 @@ class DBSIApp:
             messagebox.showerror("Save failed", str(exc))
             return
         self.status.set(f"Saved plot to {path}")
+
+    def on_open_paper(self):
+        """Opens the companion paper in the system's default PDF viewer."""
+        if not os.path.isfile(PAPER_PDF):
+            messagebox.showerror("Paper not found", f"Could not find the paper at:\n{PAPER_PDF}")
+            return
+        try:
+            if sys.platform == 'win32':
+                os.startfile(PAPER_PDF)
+            else:
+                webbrowser.open('file://' + PAPER_PDF)
+        except OSError as exc:
+            messagebox.showerror("Could not open paper", str(exc))
+            return
+        self.status.set(f"Opened {os.path.basename(PAPER_PDF)} in the default PDF viewer.")
 
 
 def main():

@@ -1,7 +1,7 @@
 # DBSI0 / DBSI2 Explorer
 
 A small desktop GUI companion to *"Parametric Expansion of Clear-Sky Beam
-Solar Irradiance into Trigonometric Time-Series"* (`ArxivPaperR03InsolationExpansion.tex`),
+Solar Irradiance into Trigonometric Time-Series"* (`ArxivPaperR04InsolationExpansion.tex`),
 for exploring the paper's closed-form Direct Beam Solar Irradiance
 approximations, **DBSI0** (eq. 3.1) and **DBSI2** (eq. 3.2), for any
 location, any date/time range, and any set of orbital elements -- no
